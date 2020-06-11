@@ -3,8 +3,11 @@ package com.redislabs.university.RU102J.dao;
 import com.redislabs.university.RU102J.api.Site;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.Pipeline;
+import redis.clients.jedis.Response;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class SiteDaoRedisImpl implements SiteDao {
     private final JedisPool jedisPool;
@@ -41,8 +44,20 @@ public class SiteDaoRedisImpl implements SiteDao {
     // Challenge #1
     @Override
     public Set<Site> findAll() {
-        // START Challenge #1
-        return Collections.emptySet();
-        // END Challenge #1
+        String siteIDsKey = RedisSchema.getSiteIDsKey();
+        Set<String> keys = jedisPool.getResource().smembers(siteIDsKey);
+        return getSitesHashes(keys).stream()
+                .map(Response::get)
+                .map(Site::new)
+                .collect(Collectors.toSet());
+    }
+
+    private Set<Response<Map<String, String>>> getSitesHashes(Set<String> ids) {
+        try (Jedis jedis = jedisPool.getResource();
+             Pipeline pipe = jedis.pipelined()) {
+            return ids.stream()
+                    .map(pipe::hgetAll)
+                    .collect(Collectors.toSet());
+        }
     }
 }
