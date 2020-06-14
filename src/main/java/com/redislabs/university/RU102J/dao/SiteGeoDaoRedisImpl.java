@@ -56,43 +56,39 @@ public class SiteGeoDaoRedisImpl implements SiteGeoDao {
         }
     }
 
-    // Challenge #5
-     private Set<Site> findSitesByGeoWithCapacity(GeoQuery query) {
-         return Collections.emptySet();
-     }
-    // Comment out the above, and uncomment what's below
-//    private Set<Site> findSitesByGeoWithCapacity(GeoQuery query) {
-//        Set<Site> results = new HashSet<>();
-//        Coordinate coord = query.getCoordinate();
-//        Double radius = query.getRadius();
-//        GeoUnit radiusUnit = query.getRadiusUnit();
-//
-//         try (Jedis jedis = jedisPool.getResource()) {
-//             // START Challenge #5
-//             // TODO: Challenge #5: Get the sites matching the geo query, store them
-//             // in List<GeoRadiusResponse> radiusResponses;
-//             // END Challenge #5
-//
-//             Set<Site> sites = radiusResponses.stream()
-//                     .map(response -> jedis.hgetAll(response.getMemberByString()))
-//                     .filter(Objects::nonNull)
-//                     .map(Site::new).collect(Collectors.toSet());
-//
-//             // START Challenge #5
-//             Pipeline pipeline = jedis.pipelined();
-//             Map<Long, Response<Double>> scores = new HashMap<>(sites.size());
-//             // TODO: Challenge #5: Add the code that populates the scores HashMap...
-//             // END Challenge #5
-//
-//             for (Site site : sites) {
-//                 if (scores.get(site.getId()).get() >= capacityThreshold) {
-//                     results.add(site);
-//                 }
-//             }
-//         }
-//
-//         return results;
-//    }
+    private Set<Site> findSitesByGeoWithCapacity(GeoQuery query) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            Set<Site> sites = getGeoRadii(jedis, query).stream()
+                    .map(response -> jedis.hgetAll(response.getMemberByString()))
+                    .filter(Objects::nonNull)
+                    .map(Site::new).collect(Collectors.toSet());
+
+            final Map<Long, Response<Double>> scores = getCapacities(jedis, sites);
+
+            return sites.stream()
+                    .filter(site -> scores.get(site.getId()).get() >= capacityThreshold)
+                    .collect(Collectors.toSet());
+        }
+    }
+
+    private List<GeoRadiusResponse> getGeoRadii(Jedis jedis, GeoQuery query) {
+        return jedis.georadius(
+                RedisSchema.getSiteGeoKey(),
+                query.getCoordinate().lng,
+                query.getCoordinate().lat,
+                query.getRadius(),
+                query.getRadiusUnit());
+    }
+
+    private Map<Long, Response<Double>> getCapacities(Jedis jedis, Set<Site> sites) {
+        String key = RedisSchema.getCapacityRankingKey();
+        try (Pipeline pipeline = jedis.pipelined()) {
+            return sites.stream().collect(Collectors.toMap(
+                    Site::getId,
+                    s -> pipeline.zscore(key, String.valueOf(s.getId()))
+            ));
+        }
+    }
 
     private Set<Site> findSitesByGeo(GeoQuery query) {
         Coordinate coord = query.getCoordinate();
